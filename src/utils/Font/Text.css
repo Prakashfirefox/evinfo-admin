@@ -1,0 +1,37 @@
+/* Import the font */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+
+.text {
+  font-family: 'Inter', sans-serif;
+  color: #4a4a4a; /* Grey/600 */
+}
+
+.h1 {
+  font-size: 48px; /* Example size */
+  font-weight: 700;
+}
+
+.h2 {
+  font-size: 40px; /* Example size */
+  font-weight: 700;
+}
+
+.h3 {
+  font-size: 32px; /* Example size */
+  font-weight: 700;
+}
+
+.h4 {
+  font-size: 24px; /* Example size */
+  font-weight: 700;
+}
+
+.p, .span, .div {
+  font-size: 16px;
+  font-weight: 400;
+}
+
+.small-text {
+  font-size: 12px;
+  font-weight: 400;
+}

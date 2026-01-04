@@ -1,0 +1,39 @@
+name: Deploy Frontend
+
+on:
+  push:
+    branches: ["dev"]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy Frontend via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            export NVM_DIR="$HOME/.nvm"
+            source "$NVM_DIR/nvm.sh"
+            nvm use 22.14.0
+
+            echo "📌 Entering frontend directory"
+            cd /home/ubuntu/Clear-Align-Admin-Web
+
+            echo "📌 Pulling latest changes"
+            git pull https://${{ secrets.GIT_USERNAME }}:${{ secrets.GIT_PAT }}@github.com/Clear-Align/Clear-Align-Admin-Web.git dev
+
+            echo "📌 Installing dependencies"
+            npm install --omit=dev --legacy-peer-deps
+
+            echo "📌 Restarting PM2 frontend"
+            pm2 stop frontend || true
+            pm2 delete frontend || true
+            pm2 start "npm start" --name frontend
+            pm2 save
