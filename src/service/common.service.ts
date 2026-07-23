@@ -1,4 +1,5 @@
 //src/service/common.service.ts
+import { toast } from "react-toastify";
 import { MODULES, SCREEN_PATH, USER_ROLES } from "../constants";
 import axiosInstance from "./axios.service";
 import {
@@ -33,6 +34,7 @@ import {
   assignOrganizationFrameworkURL,
   getFrameworksListURL
 } from "./config";
+import { FORGOT_PASSWORD_URL, RESET_PASSWORD_URL } from "./config";
 import {
   BLOG_CREATE,
   BLOG_UPDATE,
@@ -42,12 +44,131 @@ import {
   BLOG_UPDATE_STATUS
 } from "./config";
 import{ BANNER_CREATE, BANNER_UPDATE, BANNER_GET, BANNER_GET_ALL, BANNER_DELETE, BANNER_UPDATE_STATUS } from "./config";
+import {
+  BLOG_LINK_ADD, BLOG_LINK_REMOVE, BLOG_LINK_GET_BY_BLOG, BLOG_LINK_GET_BY_ENTITY,
+  STATS_DASHBOARD, STATS_OVERVIEW, STATS_BRANDS, STATS_POPULAR_VEHICLES,
+  BRAND_CREATE, BRAND_UPDATE, BRAND_GET, BRAND_GET_ALL, BRAND_DELETE, BRAND_UPDATE_STATUS,
+  MODEL_CREATE, MODEL_UPDATE, MODEL_GET, MODEL_GET_ALL, MODEL_DELETE, MODEL_UPDATE_STATUS,
+  VARIANT_CREATE, VARIANT_UPDATE, VARIANT_GET, VARIANT_GET_ALL, VARIANT_DELETE, VARIANT_UPDATE_STATUS,
+  VEHICLE_CREATE, VEHICLE_UPDATE, VEHICLE_GET, VEHICLE_GET_ALL, VEHICLE_DELETE, VEHICLE_UPDATE_STATUS,
+  REVIEW_GET_ALL, REVIEW_DELETE, REVIEW_UPDATE_STATUS,
+  DEALER_CREATE, DEALER_UPDATE, DEALER_GET, DEALER_GET_ALL, DEALER_DELETE, DEALER_UPDATE_STATUS,
+  GALLERY_ADD, GALLERY_GET, GALLERY_UPDATE, GALLERY_DELETE, GALLERY_REORDER,
+  SPEC_UPSERT, SPEC_UPDATE,
+  CONTACT_GET_ALL, CONTACT_UPDATE_STATUS, CONTACT_DELETE,
+  PRICING_CREATE, PRICING_UPDATE,
+} from "./config";
 import { io } from "socket.io-client";
 import { ModulePermissionResult } from "./types";
 
 // const headersToken = process.env.REACT_APP_OPEN_TOKEN;
 const headersToken = "$2b$10$I/l4Vr5fikIpNvaF6NbgXeJr1pB3B6cwgZMIFdM9Ot2mefrrv6o4u"
 
+
+// Extract a human-readable error string from the API's response body.
+// The backend uses several shapes:
+//   Responser.error → { status: false, message: "...", data?: {...} }
+//   validateRequest (Joi) → { error: "Field X must be ..." }
+//   ValidationErrorHandler → { status: false, message: "...", data: [{ parameter, message }, ...] }
+// We try them in order and return the first useful string we find.
+const extractApiErrorMessage = (responseBody: any): string | null => {
+  if (!responseBody || typeof responseBody !== "object") return null;
+
+  // Shape: Joi { error: "..." }
+  if (typeof responseBody.error === "string" && responseBody.error.trim()) {
+    return responseBody.error;
+  }
+
+  // Shape: { message: "..." } from Responser.error
+  if (typeof responseBody.message === "string" && responseBody.message.trim()) {
+    // If `data` carries richer field-level info, prefer that
+    const fieldMsg = extractFieldError(responseBody.data);
+    return fieldMsg || responseBody.message;
+  }
+
+  // Shape: bare { errors: [...] }
+  if (Array.isArray(responseBody.errors)) {
+    const first = responseBody.errors[0];
+    if (typeof first === "string") return first;
+    if (first && typeof first.message === "string") return first.message;
+  }
+
+  return null;
+};
+
+// Field-level extractor — handles the array-of-{parameter,message} form
+// from class-validator AND the object form { fieldName: "msg" } from Joi.
+const extractFieldError = (data: any): string | null => {
+  if (!data) return null;
+
+  // Array form: [{ parameter: "name", message: "..." }, ...]
+  if (Array.isArray(data)) {
+    const first = data[0];
+    if (first && typeof first.message === "string") {
+      return first.parameter
+        ? `${first.parameter}: ${first.message}`
+        : first.message;
+    }
+    if (typeof first === "string") return first;
+    return null;
+  }
+
+  // Object form: { fieldName: "error message" }
+  if (typeof data === "object") {
+    for (const value of Object.values(data)) {
+      if (typeof value === "string" && value.trim()) return value;
+      if (Array.isArray(value) && typeof value[0] === "string") return value[0];
+    }
+  }
+
+  return null;
+};
+
+// Centralized error toaster — uses the API's actual error text whenever possible
+// so callers don't have to guess. Pages can still toast their own success messages.
+const handleErrorToast = (error: any) => {
+  const statusCode = error?.response?.status;
+  const responseBody = error?.response?.data;
+  const apiMessage = extractApiErrorMessage(responseBody);
+
+  // No HTTP response at all → network/timeout
+  if (!error?.response) {
+    if (error?.code === "ECONNABORTED") {
+      toast.error("Request timed out. Please try again.");
+    } else {
+      toast.error("Network error. Please check your connection.");
+    }
+    return;
+  }
+
+  switch (statusCode) {
+    case 401:
+      toast.error(apiMessage || "Session expired. Please log in again.");
+      break;
+    case 403:
+      toast.error(apiMessage || "You do not have permission for this action.");
+      break;
+    case 404:
+      toast.error(apiMessage || "Resource not found.");
+      break;
+    case 409:
+      toast.error(apiMessage || "Conflict — this resource already exists.");
+      break;
+    case 400:
+    case 422:
+      toast.error(apiMessage || "Validation failed.");
+      break;
+    case 429:
+      toast.error(apiMessage || "Too many requests. Please slow down.");
+      break;
+    default:
+      if (statusCode >= 500) {
+        toast.error(apiMessage || "Server error. Please try again later.");
+      } else {
+        toast.error(apiMessage || `Request failed (${statusCode})`);
+      }
+  }
+};
 
 const apiRequest = async (
   url: string,
@@ -63,7 +184,7 @@ const apiRequest = async (
       !url.includes(`${azureLogin}/azure-login`) &&
       !url.includes(`${signOut}`)
     ) {
-      console.error("No authentication token found.");
+      toast.error("You are not signed in. Please log in.");
       return null;
     }
 
@@ -84,18 +205,23 @@ const apiRequest = async (
       withCredentials: false,
     });
 
-    if (res.status === 200 || res.status === 201) {
+    // Any 2xx is success
+    if (res.status >= 200 && res.status < 300) {
       return res;
     }
-    console.error("Unexpected response status:", res.status);
-    return null;
+
+    // Defensive — axios usually throws on non-2xx, but handle gracefully if not
+    toast.error(res.data?.message || `Unexpected response (${res.status})`);
+    return res;
   } catch (error: any) {
-    if (error.response?.status === 401) {
-      console.warn("Token expired or forbidden. Redirecting to auth page...");
-      window.location.href = "/";
+    handleErrorToast(error);
+
+    if (error?.response?.status === 401) {
+      // Delay so the toast is visible before redirect
+      setTimeout(() => { window.location.href = "/"; }, 1200);
     }
-    console.log(error)
-    return error.response;
+
+    return error?.response ?? null;
   }
 };
 
@@ -114,6 +240,29 @@ export const login = async (data: any) => {
   return await apiRequest(`${adminlogin}`, "post", data);
 };
 
+// Public requests — no auth token required (user is not logged in)
+const publicRequest = async (url: string, data: any) => {
+  try {
+    const res = await axiosInstance({
+      url,
+      method: "post",
+      data,
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      timeout: 30000,
+    });
+    return res;
+  } catch (error: any) {
+    handleErrorToast(error);
+    return error?.response ?? null;
+  }
+};
+
+export const forgotPassword = (email: string) =>
+  publicRequest(FORGOT_PASSWORD_URL, { email });
+
+export const resetPassword = (token: string, email: string, new_password: string) =>
+  publicRequest(RESET_PASSWORD_URL, { token, email, new_password });
+
 
 /* ================================
    MEDIA UPLOAD – COMMON SERVICE
@@ -126,7 +275,7 @@ export const uploadMediaFile = async (
   try {
     // 1️⃣ Get presigned upload details
     const presignRes = await apiRequest(
-      "/api/v1/media/presign",
+      "/api/v1/admin/media/presign",
       "post",
       {
         fileName: file.name,
@@ -174,9 +323,9 @@ export const getAllBlogs = (payload: {
 };
 
 // Get single blog by ID
-export const getBlogById = (id: number) => {
+export const getBlogById = (id: string) => {
   return apiRequest(
-    BLOG_GET.replace(":id", String(id)),
+    BLOG_GET.replace(":id", id),
     "get"
   );
 };
@@ -191,29 +340,29 @@ export const createBlog = (payload: any) => {
 };
 
 // Update blog
-export const updateBlog = (id: number, payload: any) => {
+export const updateBlog = (id: string, payload: any) => {
   return apiRequest(
-    BLOG_UPDATE.replace(":id", String(id)),
+    BLOG_UPDATE.replace(":id", id),
     "put",
     payload
   );
 };
 
 // Delete blog
-export const deleteBlog = (id: number) => {
+export const deleteBlog = (id: string) => {
   return apiRequest(
-    BLOG_DELETE.replace(":id", String(id)),
+    BLOG_DELETE.replace(":id", id),
     "delete"
   );
 };
 
 // Update blog status (published / draft)
 export const updateBlogStatus = (
-  id: number,
+  id: string,
   status: "published" | "draft"
 ) => {
   return apiRequest(
-    BLOG_UPDATE_STATUS.replace(":id", String(id)),
+    BLOG_UPDATE_STATUS.replace(":id", id),
     "patch",
     { status }
   );
@@ -223,21 +372,192 @@ export const createBanner= async (data: any) => {
   return await apiRequest(`${BANNER_CREATE}`, "post", data);
 };
 
-export const updateBanner= async (id: number, data: any) => { 
-  return await apiRequest(`${BANNER_UPDATE.replace(":id", String(id))}`, "put", data);
+export const updateBanner= async (id: string, data: any) => {
+  return await apiRequest(`${BANNER_UPDATE.replace(":id", id)}`, "put", data);
 };
-export const getBannerById= async (id: number) => { 
-  return await apiRequest(`${BANNER_GET.replace(":id", String(id))}`, "get"); 
+export const getBannerById= async (id: string) => {
+  return await apiRequest(`${BANNER_GET.replace(":id", id)}`, "get");
 };
 export const getAllBanners= async (data: any) => {
   return await apiRequest(`${BANNER_GET_ALL}`, "post", data);
 };
-export const deleteBanner= async (id: number) => {
-  return await apiRequest(`${BANNER_DELETE.replace(":id", String(id))}`, "delete");
+export const deleteBanner= async (id: string) => {
+  return await apiRequest(`${BANNER_DELETE.replace(":id", id)}`, "delete");
 };
-export const updateBannerStatus= async (id: number, status: 'active' | 'inactive' | 'scheduled' | 'expired') => {
-  return await apiRequest(`${BANNER_UPDATE_STATUS.replace(":id", String(id))}`, "patch", { status });
+export const updateBannerStatus= async (id: string, status: 'active' | 'inactive' | 'scheduled' | 'expired') => {
+  return await apiRequest(`${BANNER_UPDATE_STATUS.replace(":id", id)}`, "patch", { status });
 };
+
+/* ================================
+   GALLERY – ADMIN SERVICES
+================================ */
+export const addGalleryItem = async (payload: {
+  entity_type: string; entity_id: string; media_type: string;
+  category: string; url: string; thumbnail?: string;
+  title?: string; description?: string; order?: number; is_primary?: boolean;
+}) => apiRequest(GALLERY_ADD, "post", payload);
+
+export const getGalleryItems = async (entityType: string, entityId: string, params?: { media_type?: string; category?: string }) => {
+  const url = GALLERY_GET.replace(":entityType", entityType).replace(":entityId", entityId);
+  const query = params ? "?" + new URLSearchParams(params as any).toString() : "";
+  return apiRequest(`${url}${query}`, "get");
+};
+
+export const updateGalleryItem = async (id: string, payload: { category?: string; title?: string; description?: string; order?: number; is_primary?: boolean }) =>
+  apiRequest(GALLERY_UPDATE.replace(":id", id), "patch", payload);
+
+export const deleteGalleryItem = async (id: string) =>
+  apiRequest(GALLERY_DELETE.replace(":id", id), "delete");
+
+export const reorderGalleryItems = async (items: { id: string; order: number }[]) =>
+  apiRequest(GALLERY_REORDER, "post", { items });
+
+/* ================================
+   BLOG LINKS – ADMIN SERVICES
+================================ */
+export const addBlogLink = async (blog_id: string, linked_type: string, linked_id: string) =>
+  apiRequest(BLOG_LINK_ADD, "post", { blog_id, linked_type, linked_id });
+
+export const removeBlogLink = async (blog_id: string, linked_type: string, linked_id: string) =>
+  apiRequest(BLOG_LINK_REMOVE, "post", { blog_id, linked_type, linked_id });
+
+export const getBlogLinks = async (blogId: string, linked_type?: string) => {
+  const url = BLOG_LINK_GET_BY_BLOG.replace(":blogId", blogId);
+  return apiRequest(linked_type ? `${url}?linked_type=${linked_type}` : url, "get");
+};
+
+export const getLinkedBlogs = async (type: string, entityId: string, offset = 0, limit = 10) =>
+  apiRequest(
+    BLOG_LINK_GET_BY_ENTITY.replace(":type", type).replace(":entityId", entityId) + `?offset=${offset}&limit=${limit}`,
+    "get"
+  );
+
+/* ================================
+   STATS – ADMIN SERVICES
+================================ */
+export const getDashboardStats = async () =>
+  apiRequest(STATS_DASHBOARD, "get");
+export const getOverviewStats = async (params?: any) =>
+  apiRequest(`${STATS_OVERVIEW}${params ? '?' + new URLSearchParams(params).toString() : ''}`, "get");
+export const getBrandsStats = async (params?: any) =>
+  apiRequest(`${STATS_BRANDS}${params ? '?' + new URLSearchParams(params).toString() : ''}`, "get");
+export const getPopularVehiclesStats = async (params?: any) =>
+  apiRequest(`${STATS_POPULAR_VEHICLES}${params ? '?' + new URLSearchParams(params).toString() : ''}`, "get");
+
+/* ================================
+   BRANDS – ADMIN SERVICES
+================================ */
+export const getAllBrands = async (data: any) =>
+  apiRequest(BRAND_GET_ALL, "post", data);
+export const getBrandById = async (id: string) =>
+  apiRequest(BRAND_GET.replace(":id", id), "get");
+export const createBrand = async (data: any) =>
+  apiRequest(BRAND_CREATE, "post", data);
+export const updateBrand = async (id: string, data: any) =>
+  apiRequest(BRAND_UPDATE.replace(":id", id), "put", data);
+export const deleteBrand = async (id: string) =>
+  apiRequest(BRAND_DELETE.replace(":id", id), "delete");
+export const updateBrandStatus = async (id: string, status: string) =>
+  apiRequest(BRAND_UPDATE_STATUS.replace(":id", id), "patch", { status });
+
+/* ================================
+   VEHICLE MODELS – ADMIN SERVICES
+================================ */
+export const getAllModels = async (data: any) =>
+  apiRequest(MODEL_GET_ALL, "post", data);
+export const getModelById = async (id: string) =>
+  apiRequest(MODEL_GET.replace(":id", id), "get");
+export const createModel = async (data: any) =>
+  apiRequest(MODEL_CREATE, "post", data);
+export const updateModel = async (id: string, data: any) =>
+  apiRequest(MODEL_UPDATE.replace(":id", id), "put", data);
+export const deleteModel = async (id: string) =>
+  apiRequest(MODEL_DELETE.replace(":id", id), "delete");
+export const updateModelStatus = async (id: string, status: string) =>
+  apiRequest(MODEL_UPDATE_STATUS.replace(":id", id), "patch", { status });
+
+/* ================================
+   VARIANTS – ADMIN SERVICES
+================================ */
+export const getAllVariants = async (data: any) =>
+  apiRequest(VARIANT_GET_ALL, "post", data);
+export const getVariantById = async (id: string) =>
+  apiRequest(VARIANT_GET.replace(":id", id), "get");
+export const createVariant = async (data: any) =>
+  apiRequest(VARIANT_CREATE, "post", data);
+export const updateVariant = async (id: string, data: any) =>
+  apiRequest(VARIANT_UPDATE.replace(":id", id), "put", data);
+export const deleteVariant = async (id: string) =>
+  apiRequest(VARIANT_DELETE.replace(":id", id), "delete");
+export const updateVariantStatus = async (id: string, status: string) =>
+  apiRequest(VARIANT_UPDATE_STATUS.replace(":id", id), "patch", { status });
+
+/* ================================
+   VEHICLES – ADMIN SERVICES
+================================ */
+export const getAllVehicles = async (data: any) =>
+  apiRequest(VEHICLE_GET_ALL, "post", data);
+export const getVehicleById = async (id: string) =>
+  apiRequest(VEHICLE_GET.replace(":id", id), "get");
+export const createVehicle = async (data: any) =>
+  apiRequest(VEHICLE_CREATE, "post", data);
+export const updateVehicle = async (id: string, data: any) =>
+  apiRequest(VEHICLE_UPDATE.replace(":id", id), "put", data);
+export const deleteVehicle = async (id: string) =>
+  apiRequest(VEHICLE_DELETE.replace(":id", id), "delete");
+export const updateVehicleStatus = async (id: string, status: string) =>
+  apiRequest(VEHICLE_UPDATE_STATUS.replace(":id", id), "patch", { status });
+
+/* ================================
+   SPECIFICATIONS – ADMIN SERVICES
+================================ */
+export const getContactMessages = async (params?: any) => {
+  const q = new URLSearchParams(params || {}).toString();
+  return apiRequest(`${CONTACT_GET_ALL}${q ? `?${q}` : ""}`, "get");
+};
+export const updateContactStatus = async (id: string, status: string) =>
+  apiRequest(CONTACT_UPDATE_STATUS.replace(":id", id), "patch", { status });
+export const deleteContactMessage = async (id: string) =>
+  apiRequest(CONTACT_DELETE.replace(":id", id), "delete");
+
+export const upsertSpecifications = async (data: any) =>
+  apiRequest(SPEC_UPSERT, "post", data);
+export const updateSpecifications = async (id: string, data: any) =>
+  apiRequest(SPEC_UPDATE.replace(":id", id), "put", data);
+
+/* ================================
+   PRICING – ADMIN SERVICES
+================================ */
+export const createPricing = async (data: any) =>
+  apiRequest(PRICING_CREATE, "post", data);
+export const updatePricing = async (id: string, data: any) =>
+  apiRequest(PRICING_UPDATE.replace(":id", id), "put", data);
+
+/* ================================
+   REVIEWS – ADMIN SERVICES
+================================ */
+export const getAllReviews = async (data: any) =>
+  apiRequest(REVIEW_GET_ALL, "post", data);
+export const deleteReview = async (id: string) =>
+  apiRequest(REVIEW_DELETE.replace(":id", id), "delete");
+export const updateReviewStatus = async (id: string, status: string) =>
+  apiRequest(REVIEW_UPDATE_STATUS.replace(":id", id), "patch", { status });
+
+/* ================================
+   DEALERS – ADMIN SERVICES
+================================ */
+export const getAllDealers = async (data: any) =>
+  apiRequest(DEALER_GET_ALL, "post", data);
+export const getDealerById = async (id: string) =>
+  apiRequest(DEALER_GET.replace(":id", id), "get");
+export const createDealer = async (data: any) =>
+  apiRequest(DEALER_CREATE, "post", data);
+export const updateDealer = async (id: string, data: any) =>
+  apiRequest(DEALER_UPDATE.replace(":id", id), "put", data);
+export const deleteDealer = async (id: string) =>
+  apiRequest(DEALER_DELETE.replace(":id", id), "delete");
+export const updateDealerStatus = async (id: string, status: string) =>
+  apiRequest(DEALER_UPDATE_STATUS.replace(":id", id), "patch", { status });
 
 
 

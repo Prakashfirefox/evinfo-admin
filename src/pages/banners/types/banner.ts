@@ -1,6 +1,6 @@
 // src/pages/banners/types/banner.ts
 export interface Banner {
-    id?: number;
+    id?: string;
     title: string;
     slug: string;
     image_url: string;

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx prisma *)",
+      "Read(//d/Evvo Technology/Project/evinfo-website/src/app/**)",
+      "Read(//d/Evvo Technology/Project/evinfo-website/src/**)",
+      "Bash(rm -rf node_modules/dotenv-expand)",
+      "Bash(npm install *)"
+    ]
+  }
+}

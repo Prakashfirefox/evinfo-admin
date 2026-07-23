@@ -14,6 +14,7 @@ import "react-toastify/dist/ReactToastify.css";
 import "@fontsource/poppins";
 import { AxiosResponse } from "axios";
 import { useNavigate } from "react-router-dom";
+import { Eye, EyeOff } from "lucide-react";
 
 import { login } from "../../service/common.service";
 
@@ -27,6 +28,7 @@ interface LoginFormData {
 const LoginPage: React.FC = () => {
     const { register, handleSubmit, formState: { errors } } = useForm<LoginFormData>();
     const [loading, setLoading] = useState(false);
+    const [showPassword, setShowPassword] = useState(false);
     const navigate = useNavigate();
 
     const onSubmit = async (data: LoginFormData) => {
@@ -116,21 +118,32 @@ const LoginPage: React.FC = () => {
                                     {/* Password */}
                                     <Form.Group className="mb-3" controlId="password">
                                         <Form.Label>Password</Form.Label>
-                                        <Form.Control
-                                            type="password"
-                                            placeholder="••••••••"
-                                            {...register("password", {
-                                                required: "Password is required",
-                                                minLength: {
-                                                    value: 6,
-                                                    message: "Password must be at least 6 characters",
-                                                },
-                                            })}
-                                            isInvalid={!!errors.password}
-                                        />
-                                        <Form.Control.Feedback type="invalid">
-                                            {errors.password?.message as string}
-                                        </Form.Control.Feedback>
+                                        <div className="input-group">
+                                            <Form.Control
+                                                type={showPassword ? "text" : "password"}
+                                                placeholder="••••••••"
+                                                {...register("password", {
+                                                    required: "Password is required",
+                                                    minLength: {
+                                                        value: 6,
+                                                        message: "Password must be at least 6 characters",
+                                                    },
+                                                })}
+                                                isInvalid={!!errors.password}
+                                            />
+                                            <Button
+                                                variant="outline-secondary"
+                                                type="button"
+                                                onClick={() => setShowPassword((p) => !p)}
+                                                tabIndex={-1}
+                                                aria-label={showPassword ? "Hide password" : "Show password"}
+                                            >
+                                                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                            </Button>
+                                            <Form.Control.Feedback type="invalid">
+                                                {errors.password?.message as string}
+                                            </Form.Control.Feedback>
+                                        </div>
                                     </Form.Group>
 
                                     {/* Remember Me + Forgot */}
@@ -175,7 +188,7 @@ const LoginPage: React.FC = () => {
                             </Card.Body>
 
                             <Card.Footer className="text-center small text-muted bg-white border-0 py-3">
-                                © {new Date().getFullYear()} Clear Align. All rights reserved.
+                                © {new Date().getFullYear()} Ev info Admin. All rights reserved.
                             </Card.Footer>
                         </Card>
                     </Col>

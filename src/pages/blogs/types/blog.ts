@@ -1,5 +1,7 @@
 // src/pages/blogs/types/blog.ts
+// In your types/blog.ts
 export interface BlogSection {
+  id?: string; // Change from string to number
   heading: string;
   content: string;
   images: string[];
@@ -13,7 +15,7 @@ export interface BlogSEO {
 }
 
 export interface Blog {
-  id?: number;
+  id?: string;
   title: string;
   slug: string;
   excerpt: string;

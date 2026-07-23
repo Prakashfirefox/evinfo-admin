@@ -1,39 +1,61 @@
-import { Button } from "react-bootstrap";
-import LoginLeftSide from  "../../../../components/Auth/SignIn/Index";
-import { Nav } from "react-bootstrap";
-// import Tick from "../../../../assets/images/success-tick.svg";
+import React from "react";
+import { Container, Row, Col, Card, Button } from "react-bootstrap";
+import { Link } from "react-router-dom";
 
-export default function sucess() {
+const PassSuccess: React.FC = () => {
   return (
-    <>
-      <div className="loginPageCenter">
-        <div className="loginPageWrapper">
-          <LoginLeftSide/>
-          {/* <div className="loginPageRight">
-            {loaderStatus == 0 && (
-              <div className="pageLoader">
-                <span className="spinner"></span>
-              </div>
-            )} */}
-            <div className="loginPageRight">
-              <div className="loginrightForm">
-                      <div className="contentFromSuccess">
-                          <img src="../../../../assets/images/success-tick.svg" alt="tick" className="successTick"/>
-                          <h2>Great</h2>
-                          <p className="subtext">Your Password has been reseted <br/>successfully</p> 
-                      </div>
-              
-                    {/* {error && <p className="text-danger">{error}</p>} */}
-                    
-                    <div className="submitBtn-wrap mt-4">
-                      <Nav.Link href="/auth2" className="btnw-100 text-start btn btn-primary">Back to Login</Nav.Link> 
-                    </div> 
+    <div
+      style={{
+        minHeight: "100vh",
+        background: "linear-gradient(135deg, #eef4ff 0%, #f9fbff 100%)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontFamily: "Poppins, sans-serif",
+      }}
+    >
+      <Container>
+        <Row className="justify-content-center">
+          <Col xs={11} sm={8} md={6} lg={4}>
+            <Card className="shadow-sm border-0 rounded-4">
+              <Card.Body className="p-4 text-center">
+                {/* Success icon */}
+                <div
+                  style={{
+                    width: 72,
+                    height: 72,
+                    borderRadius: "50%",
+                    background: "#d1fae5",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    margin: "0 auto 20px",
+                    fontSize: 36,
+                  }}
+                >
+                  ✓
                 </div>
-            </div>
-            </div>
-          </div>
-    
 
-    </>
-  )
-}
+                <h4 className="fw-bold text-dark mb-2">Password Reset!</h4>
+                <p className="text-muted small mb-4">
+                  Your password has been updated successfully. You can now log in
+                  with your new password.
+                </p>
+
+                <Link to="/" className="btn btn-primary w-100 fw-semibold py-2">
+                  Back to Login
+                </Link>
+              </Card.Body>
+
+              <Card.Footer className="text-center small text-muted bg-white border-0 py-3">
+                © {new Date().getFullYear()} Ev info Admin. All rights reserved.
+              </Card.Footer>
+            </Card>
+          </Col>
+        </Row>
+      </Container>
+    </div>
+  );
+};
+
+export default PassSuccess;

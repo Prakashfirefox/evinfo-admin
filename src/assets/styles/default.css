@@ -1,5 +1,5 @@
 
-*/ body {
+body {
   position: relative;
 }
 
@@ -869,7 +869,7 @@ nav#sidebar li.selected .sidenav-collapse li a.active:hover:before {
 }
 
 nav#sidebar li.active>a {
-    background: rgb(230 113 37 / 18%);
+    background: rgba(230, 113, 37, 0.18);
     color: #ed5a28;
     font-weight: 600;
 }

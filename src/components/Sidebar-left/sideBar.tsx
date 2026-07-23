@@ -84,43 +84,68 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed }) => {
                 </Nav.Link>
               </li>
 
+              {/* ── Vehicle catalog (matches API hierarchy: Brand → Model → Variant → Sub-Variant) */}
               <li className="nav-item">
-                <Nav.Link
-                  href="/lead-management"
-                  className="nav-link d-flex align-items-center my-2"
-                >
-                  <i className="bi bi-people"></i>
-                  {!isCollapsed && (
-                    <span className="nav-link-text ms-2">
-                      Banner
-                    </span>
-                  )}
+                <Nav.Link href="/brands" className="nav-link d-flex align-items-center my-2">
+                  <i className="bi bi-building"></i>
+                  {!isCollapsed && <span className="nav-link-text ms-2">Brands</span>}
                 </Nav.Link>
               </li>
 
-              {/* <li className="nav-item">
-                <Nav.Link
-                  href="#"
-                  className="nav-link d-flex align-items-center my-2"
-                >
-                  <i className="bi bi-buildings"></i>
-                  {!isCollapsed && (
-                    <span className="nav-link-text ms-2">Organizations</span>
-                  )}
+              <li className="nav-item">
+                <Nav.Link href="/models" className="nav-link d-flex align-items-center my-2">
+                  <i className="bi bi-layers"></i>
+                  {!isCollapsed && <span className="nav-link-text ms-2">Models</span>}
                 </Nav.Link>
-              </li> */}
+              </li>
 
               <li className="nav-item">
-                <Nav.Link
-                  href="/framework"
-                  className="nav-link d-flex align-items-center my-2"
-                >
-                  <i className="bi bi-diagram-3"></i>
-                  {!isCollapsed && (
-                    <span className="nav-link-text ms-2">
-                      Blogs
-                    </span>
-                  )}
+                <Nav.Link href="/variants" className="nav-link d-flex align-items-center my-2">
+                  <i className="bi bi-list-ul"></i>
+                  {!isCollapsed && <span className="nav-link-text ms-2">Variants</span>}
+                </Nav.Link>
+              </li>
+
+              <li className="nav-item">
+                <Nav.Link href="/vehicles" className="nav-link d-flex align-items-center my-2">
+                  <i className="bi bi-ev-front"></i>
+                  {!isCollapsed && <span className="nav-link-text ms-2">Sub-Variants</span>}
+                </Nav.Link>
+              </li>
+
+              {/* ── Supporting content & ops */}
+              <li className="nav-item">
+                <Nav.Link href="/banners" className="nav-link d-flex align-items-center my-2">
+                  <i className="bi bi-image"></i>
+                  {!isCollapsed && <span className="nav-link-text ms-2">Banners</span>}
+                </Nav.Link>
+              </li>
+
+              <li className="nav-item">
+                <Nav.Link href="/blogs" className="nav-link d-flex align-items-center my-2">
+                  <i className="bi bi-journal-text"></i>
+                  {!isCollapsed && <span className="nav-link-text ms-2">Blogs</span>}
+                </Nav.Link>
+              </li>
+
+              <li className="nav-item">
+                <Nav.Link href="/dealers" className="nav-link d-flex align-items-center my-2">
+                  <i className="bi bi-shop"></i>
+                  {!isCollapsed && <span className="nav-link-text ms-2">Dealers</span>}
+                </Nav.Link>
+              </li>
+
+              <li className="nav-item">
+                <Nav.Link href="/reviews" className="nav-link d-flex align-items-center my-2">
+                  <i className="bi bi-star"></i>
+                  {!isCollapsed && <span className="nav-link-text ms-2">Reviews</span>}
+                </Nav.Link>
+              </li>
+
+              <li className="nav-item">
+                <Nav.Link href="/gallery" className="nav-link d-flex align-items-center my-2">
+                  <i className="bi bi-images"></i>
+                  {!isCollapsed && <span className="nav-link-text ms-2">Gallery</span>}
                 </Nav.Link>
               </li>
             </ul>

@@ -11,7 +11,8 @@ import {
 } from "react-bootstrap";
 import { Blog, BlogSection, BlogSEO } from "./types/blog";
 import { toast } from "react-toastify";
-import { uploadMediaFile } from "../../service/common.service";
+import { uploadMediaFile, getBlogLinks, addBlogLink, removeBlogLink, getAllBrands, getAllModels, getAllVehicles } from "../../service/common.service";
+import { v4 as uuidv4 } from "uuid";
 
 interface Props {
     show: boolean;
@@ -50,13 +51,99 @@ const BlogFormModal: React.FC<Props> = ({
     const [activeSection, setActiveSection] = useState(0);
     const [expandedSections, setExpandedSections] = useState<number[]>([]);
 
+    // Links tab state
+    const [linkedContent, setLinkedContent] = useState<{ vehicles: any[]; brands: any[]; models: any[] }>({ vehicles: [], brands: [], models: [] });
+    const [linksLoading, setLinksLoading] = useState(false);
+    const [linkSelect, setLinkSelect] = useState<{ vehicle: string; brand: string; model: string }>({ vehicle: "", brand: "", model: "" });
+    const [linkingType, setLinkingType] = useState<string | null>(null);
+    const [linkOptions, setLinkOptions] = useState<{ vehicles: any[]; brands: any[]; models: any[] }>({ vehicles: [], brands: [], models: [] });
+
     useEffect(() => {
         if (initialData) {
-            setForm(initialData);
+            setForm({
+                ...initialData,
+                sections: (initialData.sections || []).map(section => ({
+                    ...section,
+                    images: Array.isArray(section.images) ? section.images : []
+                }))
+            });
         } else {
             resetForm();
         }
     }, [initialData]);
+
+    useEffect(() => {
+        if (activeSection === 5 && initialData?.id) {
+            loadLinks();
+            loadLinkOptions();
+        }
+    }, [activeSection]);
+
+    const loadLinks = async () => {
+        if (!initialData?.id) return;
+        setLinksLoading(true);
+        try {
+            const data = await getBlogLinks(initialData.id);
+            console.log("Load link data :", data?.data.data);
+            setLinkedContent({
+                vehicles: data?.data?.data.grouped?.vehicles || [],
+                brands: data?.data?.data.grouped?.brands || [],
+                models: data?.data?.data.grouped?.models || [],
+            });
+        } catch (e) {
+            toast.error("Failed to load linked content");
+        } finally {
+            setLinksLoading(false);
+        }
+    };
+
+    const loadLinkOptions = async () => {
+        try {
+            const [vRes, bRes, mRes] = await Promise.all([
+                getAllVehicles({ offset: 0, limit: 100 }),
+                getAllBrands({ offset: 0, limit: 100 }),
+                getAllModels({ offset: 0, limit: 100 }),
+            ]);
+            setLinkOptions({
+                vehicles: vRes?.data?.data?.data?.rows || vRes?.data?.data?.rows || [],
+                brands: bRes?.data?.data?.data?.rows || bRes?.data?.data?.rows || [],
+                models: mRes?.data?.data?.data?.rows || mRes?.data?.data?.rows || [],
+            });
+        } catch {
+            // silently fail — dropdowns just stay empty
+        }
+    };
+
+    const handleAddLink = async (type: "vehicle" | "brand" | "model") => {
+        const entityId = linkSelect[type].trim();
+        if (!entityId) { toast.error("Please enter an ID"); return; }
+        if (!initialData?.id) { toast.error("Save the blog first before adding links"); return; }
+        setLinkingType(type);
+        try {
+            await addBlogLink(initialData.id, type, entityId);
+            toast.success("Link added");
+            setLinkSelect(prev => ({ ...prev, [type]: "" }));
+            await loadLinks();
+        } catch (e: any) {
+            toast.error(e?.message || "Failed to add link");
+        } finally {
+            setLinkingType(null);
+        }
+    };
+
+    const handleRemoveLink = async (type: "vehicle" | "brand" | "model", entityId: string) => {
+        if (!initialData?.id) return;
+        setLinkingType(`remove-${type}-${entityId}`);
+        try {
+            await removeBlogLink(initialData.id, type, entityId);
+            toast.success("Link removed");
+            await loadLinks();
+        } catch (e: any) {
+            toast.error(e?.message || "Failed to remove link");
+        } finally {
+            setLinkingType(null);
+        }
+    };
 
     const resetForm = () => {
         setForm({
@@ -96,44 +183,53 @@ const BlogFormModal: React.FC<Props> = ({
     };
 
     const updateSection = (index: number, key: keyof BlogSection, value: any) => {
-        const updatedSections = [...form.sections];
-        updatedSections[index] = {
-            ...updatedSections[index],
-            [key]: value
-        };
-        updateField("sections", updatedSections);
+        const updatedSections = [...(form.sections || [])];
+        if (index >= 0 && index < updatedSections.length) {
+            updatedSections[index] = {
+                ...updatedSections[index],
+                [key]: value
+            };
+            updateField("sections", updatedSections);
+        }
     };
 
     const addSection = () => {
+        const currentSections = form.sections || [];
         const newSection: BlogSection = {
+            id: uuidv4(),
             heading: "",
             content: "",
             images: [],
-            order: form.sections.length + 1
+            order: currentSections.length + 1
         };
-        updateField("sections", [...form.sections, newSection]);
+        const newSections = [...currentSections, newSection];
+        updateField("sections", newSections);
         // Expand the new section
-        setExpandedSections([...expandedSections, form.sections.length]);
+        setExpandedSections(prev => [...prev, newSections.length - 1]);
     };
 
     const removeSection = (index: number) => {
-        const updatedSections = form.sections.filter((_, i) => i !== index);
+        const currentSections = form.sections || [];
+        const updatedSections = currentSections.filter((_, i) => i !== index);
         const reorderedSections = updatedSections.map((section, idx) => ({
             ...section,
             order: idx + 1
         }));
         updateField("sections", reorderedSections);
-        // Remove from expanded sections
-        setExpandedSections(expandedSections.filter(i => i !== index));
+        // Remove from expanded sections and adjust indices
+        setExpandedSections(prev =>
+            prev
+                .filter(i => i !== index)
+                .map(i => i > index ? i - 1 : i)
+        );
     };
 
     const toggleSection = (index: number) => {
-        if (expandedSections.includes(index)) {
-            setExpandedSections(expandedSections.filter(i => i !== index));
-        } else {
-            setExpandedSections([...expandedSections, index]);
-        }
+        setExpandedSections(prev =>
+            prev.includes(index) ? prev.filter(x => x !== index) : [...prev, index]
+        );
     };
+
 
     const addCategory = () => {
         if (newCategory.trim()) {
@@ -184,7 +280,7 @@ const BlogFormModal: React.FC<Props> = ({
         } else {
             setUploadingCover(true);
         }
-        
+
         try {
             const urls = await Promise.all(
                 Array.from(files).map(file =>
@@ -216,7 +312,7 @@ const BlogFormModal: React.FC<Props> = ({
         if (!files || files.length === 0) return;
 
         const urls = await uploadImages(files, folder, sectionIndex);
-        
+        console.log('Uploaded URLs:', urls);
         if (isCoverImage) {
             updateField("cover_images", [...form.cover_images, ...urls]);
         } else if (sectionIndex !== undefined) {
@@ -228,16 +324,31 @@ const BlogFormModal: React.FC<Props> = ({
         e.target.value = '';
     };
 
-    const removeImage = (index: number, isCoverImage: boolean = true, sectionIndex?: number) => {
+    const removeImage = (
+        imageIndex: number,
+        isCoverImage: boolean,
+        sectionIndex?: number
+    ) => {
         if (isCoverImage) {
-            const updatedImages = form.cover_images.filter((_, i) => i !== index);
-            updateField("cover_images", updatedImages);
-            toast.success("Cover image removed");
-        } else if (sectionIndex !== undefined) {
-            const section = form.sections[sectionIndex];
-            const updatedImages = section.images.filter((_, i) => i !== index);
-            updateSection(sectionIndex, "images", updatedImages);
-            toast.success("Section image removed");
+            const updatedCoverImages = [...form.cover_images];
+            updatedCoverImages.splice(imageIndex, 1);
+            updateField("cover_images", updatedCoverImages);
+            return;
+        }
+
+        if (sectionIndex === undefined) return;
+
+        const updatedSections = [...(form.sections || [])];
+        if (sectionIndex >= 0 && sectionIndex < updatedSections.length) {
+            const sectionImages = [...(updatedSections[sectionIndex].images || [])];
+            sectionImages.splice(imageIndex, 1);
+
+            updatedSections[sectionIndex] = {
+                ...updatedSections[sectionIndex],
+                images: sectionImages
+            };
+
+            updateField("sections", updatedSections);
         }
     };
 
@@ -251,8 +362,16 @@ const BlogFormModal: React.FC<Props> = ({
             toast.error("Slug is required");
             return;
         }
+        const { id, ...payload } = form as any;
+        // Ensure all sections have images as array (not null)
+        const finalForm = {
+            ...payload,
+            sections: (payload.sections || []).map((section: any) => ({
+                ...section,
+                images: section.images || [] // Ensure images is always an array
+            }))
+        };
 
-        const finalForm = { ...form };
         if (!finalForm.seo.metaTitle) {
             finalForm.seo.metaTitle = finalForm.title;
         }
@@ -264,12 +383,15 @@ const BlogFormModal: React.FC<Props> = ({
     };
 
     return (
-        <Offcanvas 
-            show={show} 
-            onHide={onHide} 
-            placement="end" 
+        <Offcanvas
+            show={show}
+            onHide={onHide}
+            placement="end"
             style={{ width: "800px" }}
             className="blog-form-offcanvas"
+            onEscapeKeyDown={(e: any) => e.stopPropagation()} // Prevent escape key from closing
+            backdrop="static" // Prevent clicking outside from closing
+            scroll={true} // Enable scrolling
         >
             <Offcanvas.Header closeButton className="bg-light border-bottom">
                 <Offcanvas.Title className="fw-bold">
@@ -282,41 +404,50 @@ const BlogFormModal: React.FC<Props> = ({
                     {/* Left sidebar for navigation */}
                     <div className="border-end bg-light" style={{ width: "200px" }}>
                         <nav className="nav flex-column p-3">
-                            <button 
+                            <button
                                 className={`nav-link text-start mb-2 ${activeSection === 0 ? 'active' : ''}`}
                                 onClick={() => setActiveSection(0)}
                             >
                                 <i className="bi bi-info-circle me-2"></i>
                                 Basic Info
                             </button>
-                            <button 
+                            <button
                                 className={`nav-link text-start mb-2 ${activeSection === 1 ? 'active' : ''}`}
                                 onClick={() => setActiveSection(1)}
                             >
                                 <i className="bi bi-tags me-2"></i>
                                 Categories & Tags
                             </button>
-                            <button 
+                            <button
                                 className={`nav-link text-start mb-2 ${activeSection === 2 ? 'active' : ''}`}
                                 onClick={() => setActiveSection(2)}
                             >
                                 <i className="bi bi-file-text me-2"></i>
                                 Content Sections
                             </button>
-                            <button 
+                            <button
                                 className={`nav-link text-start mb-2 ${activeSection === 3 ? 'active' : ''}`}
                                 onClick={() => setActiveSection(3)}
                             >
                                 <i className="bi bi-search me-2"></i>
                                 SEO Settings
                             </button>
-                            <button 
+                            <button
                                 className={`nav-link text-start mb-2 ${activeSection === 4 ? 'active' : ''}`}
                                 onClick={() => setActiveSection(4)}
                             >
                                 <i className="bi bi-gear me-2"></i>
                                 Settings
                             </button>
+                            {initialData?.id && (
+                                <button
+                                    className={`nav-link text-start mb-2 ${activeSection === 5 ? 'active' : ''}`}
+                                    onClick={() => setActiveSection(5)}
+                                >
+                                    <i className="bi bi-link-45deg me-2"></i>
+                                    Linked Content
+                                </button>
+                            )}
                         </nav>
                     </div>
 
@@ -371,7 +502,7 @@ const BlogFormModal: React.FC<Props> = ({
                                                 type="file"
                                                 multiple
                                                 accept="image/*"
-                                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => 
+                                                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                                                     handleFileUpload(e, "blogs/covers", true)
                                                 }
                                                 disabled={uploadingCover}
@@ -383,7 +514,7 @@ const BlogFormModal: React.FC<Props> = ({
                                                 </div>
                                             )}
                                         </div>
-                                        
+
                                         {/* Uploaded images preview */}
                                         {form.cover_images.length > 0 && (
                                             <div className="mt-3">
@@ -393,8 +524,8 @@ const BlogFormModal: React.FC<Props> = ({
                                                 <div className="d-flex flex-wrap gap-2">
                                                     {form.cover_images.map((url, idx) => (
                                                         <div key={idx} className="position-relative" style={{ width: "80px", height: "80px" }}>
-                                                            <img 
-                                                                src={url} 
+                                                            <img
+                                                                src={url}
                                                                 alt={`Cover ${idx + 1}`}
                                                                 className="img-thumbnail w-100 h-100 object-fit-cover"
                                                                 style={{ borderRadius: "4px" }}
@@ -402,7 +533,11 @@ const BlogFormModal: React.FC<Props> = ({
                                                             <button
                                                                 className="position-absolute top-0 end-0 btn btn-sm btn-danger p-0"
                                                                 style={{ width: "20px", height: "20px", fontSize: "10px" }}
-                                                                onClick={() => removeImage(idx)}
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    e.preventDefault();
+                                                                    removeImage(idx, true);
+                                                                }}
                                                             >
                                                                 ×
                                                             </button>
@@ -503,23 +638,23 @@ const BlogFormModal: React.FC<Props> = ({
                                             Add Section
                                         </Button>
                                     </div>
-                                    
-                                    {form.sections.length === 0 ? (
+
+                                    {(form.sections || []).length === 0 ? ( // Add null check here
                                         <div className="text-center py-4 text-muted">
                                             <i className="bi bi-file-text fs-1 mb-2"></i>
                                             <p>No sections added yet</p>
                                         </div>
                                     ) : (
                                         <div>
-                                            {form.sections.map((section, idx) => (
-                                                <div key={idx} className="card mb-3 border">
-                                                    <div 
+                                            {(form.sections || []).map((section, index) => ( // Add null check here
+                                                <div key={section.id || `section-${index}`} className="card mb-3 border">
+                                                    <div
                                                         className="card-header bg-light d-flex justify-content-between align-items-center"
                                                         style={{ cursor: "pointer" }}
-                                                        onClick={() => toggleSection(idx)}
+                                                        onClick={() => toggleSection(index)}
                                                     >
                                                         <div className="d-flex align-items-center">
-                                                            <i className={`bi bi-chevron-${expandedSections.includes(idx) ? 'down' : 'right'} me-2`}></i>
+                                                            <i className={`bi bi-chevron-${expandedSections.includes(index) ? 'down' : 'right'} me-2`}></i>
                                                             <span className="fw-medium">Section {section.order}</span>
                                                             {section.heading && (
                                                                 <span className="text-muted small ms-2">- {section.heading}</span>
@@ -531,21 +666,21 @@ const BlogFormModal: React.FC<Props> = ({
                                                                 size="sm"
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
-                                                                    removeSection(idx);
+                                                                    removeSection(index);
                                                                 }}
                                                             >
                                                                 <i className="bi bi-trash"></i>
                                                             </Button>
                                                         </div>
                                                     </div>
-                                                    
-                                                    {expandedSections.includes(idx) && (
+
+                                                    {expandedSections.includes(index) && (
                                                         <div className="card-body">
                                                             <Form.Group className="mb-3">
                                                                 <Form.Label>Heading</Form.Label>
                                                                 <Form.Control
-                                                                    value={section.heading}
-                                                                    onChange={e => updateSection(idx, "heading", e.target.value)}
+                                                                    value={section.heading || ""}
+                                                                    onChange={e => updateSection(index, "heading", e.target.value)}
                                                                     placeholder="Section heading"
                                                                 />
                                                             </Form.Group>
@@ -554,8 +689,8 @@ const BlogFormModal: React.FC<Props> = ({
                                                                 <Form.Control
                                                                     as="textarea"
                                                                     rows={4}
-                                                                    value={section.content}
-                                                                    onChange={e => updateSection(idx, "content", e.target.value)}
+                                                                    value={section.content || ""}
+                                                                    onChange={e => updateSection(index, "content", e.target.value)}
                                                                     placeholder="Section content"
                                                                 />
                                                             </Form.Group>
@@ -566,21 +701,21 @@ const BlogFormModal: React.FC<Props> = ({
                                                                         type="file"
                                                                         multiple
                                                                         accept="image/*"
-                                                                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => 
-                                                                            handleFileUpload(e, "blogs/sections", false, idx)
+                                                                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                                                                            handleFileUpload(e, "blogs/sections", false, index)
                                                                         }
-                                                                        disabled={uploadingSection === idx}
+                                                                        disabled={uploadingSection === index}
                                                                     />
-                                                                    {uploadingSection === idx && (
+                                                                    {uploadingSection === index && (
                                                                         <div className="text-muted mt-2 small">
                                                                             <i className="bi bi-upload me-1"></i>
                                                                             Uploading images...
                                                                         </div>
                                                                     )}
                                                                 </div>
-                                                                
+
                                                                 {/* Section images preview */}
-                                                                {section.images.length > 0 && (
+                                                                {(section.images || []).length > 0 && (
                                                                     <div className="mt-3">
                                                                         <p className="text-muted mb-2">
                                                                             <small>Section images ({section.images.length})</small>
@@ -588,15 +723,19 @@ const BlogFormModal: React.FC<Props> = ({
                                                                         <div className="d-flex flex-wrap gap-2">
                                                                             {section.images.map((url, imgIdx) => (
                                                                                 <div key={imgIdx} className="position-relative" style={{ width: "60px", height: "60px" }}>
-                                                                                    <img 
-                                                                                        src={url} 
-                                                                                        alt={`Section ${idx + 1} Image ${imgIdx + 1}`}
+                                                                                    <img
+                                                                                        src={url}
+                                                                                        alt={`Section ${section.id} Image ${imgIdx + 1}`}
                                                                                         className="img-thumbnail w-100 h-100 object-fit-cover"
                                                                                     />
                                                                                     <button
                                                                                         className="position-absolute top-0 end-0 btn btn-sm btn-danger p-0"
                                                                                         style={{ width: "16px", height: "16px", fontSize: "8px" }}
-                                                                                        onClick={() => removeImage(imgIdx, false, idx)}
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation(); // Prevent event from bubbling up
+                                                                                            e.preventDefault(); // Prevent default behavior
+                                                                                            removeImage(imgIdx, false, index);
+                                                                                        }}
                                                                                     >
                                                                                         ×
                                                                                     </button>
@@ -705,6 +844,149 @@ const BlogFormModal: React.FC<Props> = ({
                                     </Row>
                                 </div>
                             )}
+                            {/* Linked Content */}
+                            {activeSection === 5 && (
+                                <div className="mb-4">
+                                    <h5 className="mb-3">
+                                        <i className="bi bi-link-45deg me-2"></i>
+                                        Linked Content
+                                    </h5>
+                                    {linksLoading ? (
+                                        <div className="text-center py-4 text-muted">
+                                            <div className="spinner-border spinner-border-sm me-2" role="status"></div>
+                                            Loading linked content...
+                                        </div>
+                                    ) : (
+                                        <>
+                                            {/* Vehicles */}
+                                            <div className="mb-4">
+                                                <h6 className="fw-semibold mb-2"><i className="bi bi-ev-front me-2"></i>Vehicles</h6>
+                                                <InputGroup className="mb-2">
+                                                    <Form.Select
+                                                        value={linkSelect.vehicle}
+                                                        onChange={e => setLinkSelect(prev => ({ ...prev, vehicle: e.target.value }))}
+                                                    >
+                                                        <option value="">-- Select a vehicle --</option>
+                                                        {linkOptions.vehicles.map((v: any) => (
+                                                            <option key={v.id} value={v.id}>{v.name}</option>
+                                                        ))}
+                                                    </Form.Select>
+                                                    <Button
+                                                        variant="outline-primary"
+                                                        onClick={() => handleAddLink("vehicle")}
+                                                        disabled={linkingType === "vehicle" || !linkSelect.vehicle}
+                                                    >
+                                                        {linkingType === "vehicle" ? <span className="spinner-border spinner-border-sm" /> : <><i className="bi bi-plus me-1"></i>Link</>}
+                                                    </Button>
+                                                </InputGroup>
+                                                {linkedContent.vehicles.length === 0 ? (
+                                                    <p className="text-muted small">No vehicles linked</p>
+                                                ) : (
+                                                    <div className="d-flex flex-wrap gap-2">
+                                                        {linkedContent.vehicles.map((item: any) => (
+                                                            <Badge key={item.id} bg="primary" className="d-inline-flex align-items-center gap-1 py-2 px-2">
+                                                                <span>{item.linked_entity?.name || item.linked_id}</span>
+                                                                <button
+                                                                    className="btn btn-sm p-0 ms-1 text-white"
+                                                                    style={{ lineHeight: 1, fontSize: "0.75rem" }}
+                                                                    disabled={linkingType === `remove-vehicle-${item.linked_id}`}
+                                                                    onClick={() => handleRemoveLink("vehicle", item.linked_id)}
+                                                                >
+                                                                    ×
+                                                                </button>
+                                                            </Badge>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* Brands */}
+                                            <div className="mb-4">
+                                                <h6 className="fw-semibold mb-2"><i className="bi bi-building me-2"></i>Brands</h6>
+                                                <InputGroup className="mb-2">
+                                                    <Form.Select
+                                                        value={linkSelect.brand}
+                                                        onChange={e => setLinkSelect(prev => ({ ...prev, brand: e.target.value }))}
+                                                    >
+                                                        <option value="">-- Select a brand --</option>
+                                                        {linkOptions.brands.map((b: any) => (
+                                                            <option key={b.id} value={b.id}>{b.name}</option>
+                                                        ))}
+                                                    </Form.Select>
+                                                    <Button
+                                                        variant="outline-success"
+                                                        onClick={() => handleAddLink("brand")}
+                                                        disabled={linkingType === "brand" || !linkSelect.brand}
+                                                    >
+                                                        {linkingType === "brand" ? <span className="spinner-border spinner-border-sm" /> : <><i className="bi bi-plus me-1"></i>Link</>}
+                                                    </Button>
+                                                </InputGroup>
+                                                {linkedContent.brands.length === 0 ? (
+                                                    <p className="text-muted small">No brands linked</p>
+                                                ) : (
+                                                    <div className="d-flex flex-wrap gap-2">
+                                                        {linkedContent.brands.map((item: any) => (
+                                                            <Badge key={item.id} bg="success" className="d-inline-flex align-items-center gap-1 py-2 px-2">
+                                                                <span>{item.linked_entity?.name || item.linked_id}</span>
+                                                                <button
+                                                                    className="btn btn-sm p-0 ms-1 text-white"
+                                                                    style={{ lineHeight: 1, fontSize: "0.75rem" }}
+                                                                    disabled={linkingType === `remove-brand-${item.linked_id}`}
+                                                                    onClick={() => handleRemoveLink("brand", item.linked_id)}
+                                                                >
+                                                                    ×
+                                                                </button>
+                                                            </Badge>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* Models */}
+                                            <div className="mb-4">
+                                                <h6 className="fw-semibold mb-2"><i className="bi bi-layers me-2"></i>Models</h6>
+                                                <InputGroup className="mb-2">
+                                                    <Form.Select
+                                                        value={linkSelect.model}
+                                                        onChange={e => setLinkSelect(prev => ({ ...prev, model: e.target.value }))}
+                                                    >
+                                                        <option value="">-- Select a model --</option>
+                                                        {linkOptions.models.map((m: any) => (
+                                                            <option key={m.id} value={m.id}>{m.name}</option>
+                                                        ))}
+                                                    </Form.Select>
+                                                    <Button
+                                                        variant="outline-warning"
+                                                        onClick={() => handleAddLink("model")}
+                                                        disabled={linkingType === "model" || !linkSelect.model}
+                                                    >
+                                                        {linkingType === "model" ? <span className="spinner-border spinner-border-sm" /> : <><i className="bi bi-plus me-1"></i>Link</>}
+                                                    </Button>
+                                                </InputGroup>
+                                                {linkedContent.models.length === 0 ? (
+                                                    <p className="text-muted small">No models linked</p>
+                                                ) : (
+                                                    <div className="d-flex flex-wrap gap-2">
+                                                        {linkedContent.models.map((item: any) => (
+                                                            <Badge key={item.id} bg="warning" text="dark" className="d-inline-flex align-items-center gap-1 py-2 px-2">
+                                                                <span>{item.linked_entity?.name || item.linked_id}</span>
+                                                                <button
+                                                                    className="btn btn-sm p-0 ms-1"
+                                                                    style={{ lineHeight: 1, fontSize: "0.75rem" }}
+                                                                    disabled={linkingType === `remove-model-${item.linked_id}`}
+                                                                    onClick={() => handleRemoveLink("model", item.linked_id)}
+                                                                >
+                                                                    ×
+                                                                </button>
+                                                            </Badge>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                            )}
                         </Form>
                     </div>
                 </div>
@@ -729,11 +1011,11 @@ const BlogFormModal: React.FC<Props> = ({
                                 Next
                                 <i className="bi bi-chevron-right ms-1"></i>
                             </Button>
-                        ) : (
+                        ) : activeSection === 4 ? (
                             <Button variant="primary" onClick={handleSubmit}>
                                 {initialData ? "Update Blog" : "Create Blog"}
                             </Button>
-                        )}
+                        ) : null}
                     </div>
                 </div>
             </div>

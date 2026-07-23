@@ -74,27 +74,19 @@ const Blogs: React.FC = () => {
   }, [search, offset]);
 
   const saveBlog = async (payload: Blog) => {
-    try {
-      let res;
-      if (editBlog) {
-        res = await updateBlog(editBlog.id!, payload);
-        toast.success("Blog updated successfully");
-      } else {
-        res = await createBlog(payload);
-        toast.success("Blog created successfully");
-      }
+    const res = editBlog
+      ? await updateBlog(editBlog.id!, payload)
+      : await createBlog(payload);
 
-      if (res?.data?.status) {
-        setShowModal(false);
-        setEditBlog(null);
-        fetchBlogs();
-      }
-    } catch (error) {
-      toast.error("Failed to save blog");
+    if (res?.data?.status) {
+      toast.success(editBlog ? "Blog updated successfully" : "Blog created successfully");
+      setShowModal(false);
+      setEditBlog(null);
+      fetchBlogs();
     }
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: string) => {
     if (!window.confirm("Are you sure you want to delete this blog?")) return;
 
     try {

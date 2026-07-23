@@ -72,27 +72,19 @@ const Banners: React.FC = () => {
     }, [search, offset]);
 
     const saveBanner = async (payload: Banner) => {
-        try {
-            let res;
-            if (editBanner) {
-                res = await updateBanner(editBanner.id!, payload);
-                toast.success("Banner updated successfully");
-            } else {
-                res = await createBanner(payload);
-                toast.success("Banner created successfully");
-            }
+        const res = editBanner
+            ? await updateBanner(editBanner.id!, payload)
+            : await createBanner(payload);
 
-            if (res?.data?.status) {
-                setShowModal(false);
-                setEditBanner(null);
-                fetchBanners();
-            }
-        } catch (error) {
-            toast.error("Failed to save banner");
+        if (res?.data?.status) {
+            toast.success(editBanner ? "Banner updated successfully" : "Banner created successfully");
+            setShowModal(false);
+            setEditBanner(null);
+            fetchBanners();
         }
     };
 
-    const handleDelete = async (id: number) => {
+    const handleDelete = async (id: string) => {
         if (!window.confirm("Are you sure you want to delete this banner?")) return;
 
         try {
