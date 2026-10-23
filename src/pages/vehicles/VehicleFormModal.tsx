@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { Offcanvas, Button, Form, Row, Col, Badge } from "react-bootstrap";
+import React, { useEffect, useRef, useState } from "react";
+import { Offcanvas, Button, Form, Row, Col, Badge, Spinner } from "react-bootstrap";
 import {
     Vehicle, VehicleStatus,
     FuelType, Transmission, Drivetrain, ApiOwnership,
@@ -15,7 +15,15 @@ interface Props {
     onHide: () => void;
     onSubmit: (payload: Vehicle) => void;
     initialData?: Vehicle | null;
+    /** Edit mode only: save a single section independently. */
+    onSectionSave?: (section: string, form: any) => Promise<{ ok: boolean; pricingId?: string }>;
 }
+
+// Section keys aligned 1:1 with the `steps` array below.
+const SECTION_KEYS = [
+    "basic", "performance", "battery", "dimensions",
+    "safety", "features", "pricing", "ownership", "settings",
+] as const;
 
 const defaultForm: Vehicle = {
     name: "", slug: "", brand_id: "", model_id: "", variant_id: "",
@@ -61,12 +69,39 @@ const Divider = ({ label }: { label: string }) => (
     </div>
 );
 
-const VehicleFormModal: React.FC<Props> = ({ show, onHide, onSubmit, initialData }) => {
+const VehicleFormModal: React.FC<Props> = ({ show, onHide, onSubmit, initialData, onSectionSave }) => {
     const [form, setForm] = useState<Vehicle>(defaultForm);
     const [activeSection, setActiveSection] = useState(0);
     const [brands, setBrands] = useState<DropdownItem[]>([]);
     const [models, setModels] = useState<DropdownItem[]>([]);
     const [variants, setVariants] = useState<DropdownItem[]>([]);
+
+    // Per-section edit state (edit mode only)
+    const isEdit = !!initialData;
+    const [savingSection, setSavingSection] = useState<number | null>(null);
+    const [pricingId, setPricingId] = useState<string | null>(null);
+    const savedSnapshots = useRef<string[]>([]);   // JSON per section as last saved
+    const [, bumpSnap] = useState(0);              // force re-render after ref update
+
+    // Slice the form down to just the data a given section owns — used for
+    // dirty-tracking (compare against the last-saved snapshot).
+    const sliceForSection = (f: Vehicle, i: number): any => {
+        const s: any = f.specifications || {};
+        switch (i) {
+            case 0: return { name: f.name, slug: f.slug, variant_id: f.variant_id, fuel_type: f.fuel_type, transmission: f.transmission, engine: f.engine, drivetrain: f.drivetrain };
+            case 1: return s.performance ?? {};
+            case 2: return s.battery ?? {};
+            case 3: return { dimensions: s.dimensions ?? {}, interior: s.interior ?? {} };
+            case 4: return { safety: s.safety ?? {}, wheels: s.wheels ?? {} };
+            case 5: return s.features ?? {};
+            case 6: return f.pricing ?? {};
+            case 7: return f.api_ownership ?? {};
+            case 8: return { status: f.status, featured: f.featured, competitor_ids: f.competitor_ids };
+            default: return {};
+        }
+    };
+
+    const isDirty = (i: number) => savedSnapshots.current[i] !== JSON.stringify(sliceForSection(form, i));
 
     const [featureInputs, setFeatureInputs] = useState<Record<string, string>>({ exterior: "", interior: "", comfort: "", entertainment: "", connectivity: "", convenience: "" });
     const [competitorInput, setCompetitorInput] = useState("");
@@ -78,6 +113,10 @@ const VehicleFormModal: React.FC<Props> = ({ show, onHide, onSubmit, initialData
             const derived_brand_id = brand?.id || variant?.model?.brand?.id || variant?.model?.brand_id || (clean as any).brand_id || "";
             const derived_model_id = model?.id || variant?.model?.id || variant?.model_id || (clean as any).model_id || "";
             const derived_variant_id = variant?.id || (clean as any).variant_id || "";
+            // featured + competitor_ids live on the parent Variant — load them so the
+            // Settings section shows the real values and dirty-tracking is accurate.
+            const derived_featured = (variant as any)?.featured ?? (clean as any).featured ?? false;
+            const derived_competitor_ids = (variant as any)?.competitor_ids ?? (clean as any).competitor_ids ?? [];
 
             const api_ownership: ApiOwnership = ownership && typeof ownership === "object"
                 ? {
@@ -188,20 +227,31 @@ const VehicleFormModal: React.FC<Props> = ({ show, onHide, onSubmit, initialData
                 } : defaultForm.pricing!.financing,
             };
 
-            setForm({
+            const newForm: Vehicle = {
                 ...defaultForm,
                 ...clean,
                 brand_id: derived_brand_id,
                 model_id: derived_model_id,
                 variant_id: derived_variant_id,
+                featured: derived_featured,
+                competitor_ids: derived_competitor_ids,
                 api_ownership,
                 specifications,
                 pricing: vehiclePricing,
-            });
+            };
+            setForm(newForm);
+            setActiveSection(0);
+            // Snapshot each section so edits can be dirty-tracked per section.
+            savedSnapshots.current = SECTION_KEYS.map((_, i) => JSON.stringify(sliceForSection(newForm, i)));
+            setPricingId((pricing || [])[0]?.id ?? null);
+            bumpSnap(v => v + 1);
         } else {
             setForm(defaultForm);
             setActiveSection(0);
+            savedSnapshots.current = [];
+            setPricingId(null);
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [initialData, show]);
 
     useEffect(() => {
@@ -326,6 +376,19 @@ const VehicleFormModal: React.FC<Props> = ({ show, onHide, onSubmit, initialData
         payload._pricingId = (initialData as any)?.pricing?.[0]?.id ?? null;
 
         onSubmit(payload);
+    };
+
+    // Edit mode: persist just the active section via its own API call.
+    const handleSectionSave = async (i: number) => {
+        if (!onSectionSave) return;
+        setSavingSection(i);
+        const res = await onSectionSave(SECTION_KEYS[i], { ...form, _pricingId: pricingId });
+        setSavingSection(null);
+        if (res?.ok) {
+            if (res.pricingId) setPricingId(res.pricingId);
+            savedSnapshots.current[i] = JSON.stringify(sliceForSection(form, i));
+            bumpSnap(v => v + 1);
+        }
     };
 
     const updateApiOwnership = (key: keyof ApiOwnership, value: any) =>
@@ -518,7 +581,10 @@ const VehicleFormModal: React.FC<Props> = ({ show, onHide, onSubmit, initialData
                                     }}>
                                         {isDone ? "✓" : i + 1}
                                     </div>
-                                    {step.label}
+                                    <span style={{ flex: 1 }}>{step.label}</span>
+                                    {isEdit && isDirty(i) && (
+                                        <span title="Unsaved changes" style={{ width: 7, height: 7, borderRadius: "50%", background: "#f59e0b", flexShrink: 0 }} />
+                                    )}
                                 </button>
                             );
                         })}
@@ -883,32 +949,67 @@ const VehicleFormModal: React.FC<Props> = ({ show, onHide, onSubmit, initialData
                                 <i className="bi bi-chevron-left me-1" />Back
                             </Button>
                         )}
-                        <Button
-                            variant="outline-warning"
-                            size="sm"
-                            onClick={fillDummyData}
-                            title="Fill form with sample data for testing"
-                            style={{ fontSize: 12 }}
-                        >
-                            <i className="bi bi-stars me-1" />Fill Demo
-                        </Button>
+                        {!isEdit && (
+                            <Button
+                                variant="outline-warning"
+                                size="sm"
+                                onClick={fillDummyData}
+                                title="Fill form with sample data for testing"
+                                style={{ fontSize: 12 }}
+                            >
+                                <i className="bi bi-stars me-1" />Fill Demo
+                            </Button>
+                        )}
                     </div>
                     <span style={{ fontSize: 12, color: "#adb5bd", fontWeight: 500 }}>
                         {activeSection + 1} of {steps.length}
                     </span>
-                    <div className="d-flex gap-2">
-                        <Button variant="outline-secondary" size="sm" onClick={onHide}>Cancel</Button>
-                        {activeSection < steps.length - 1 ? (
-                            <Button variant="primary" size="sm" onClick={() => setActiveSection(activeSection + 1)}>
-                                Continue <i className="bi bi-chevron-right ms-1" />
+                    {isEdit ? (
+                        <div className="d-flex gap-2 align-items-center">
+                            {isDirty(activeSection) ? (
+                                <span style={{ fontSize: 11, color: "#b45309", fontWeight: 600 }}>
+                                    <i className="bi bi-exclamation-circle me-1" />Unsaved
+                                </span>
+                            ) : (
+                                <span style={{ fontSize: 11, color: "#15803d", fontWeight: 600 }}>
+                                    <i className="bi bi-check-circle me-1" />Saved
+                                </span>
+                            )}
+                            <Button variant="outline-secondary" size="sm" onClick={onHide}>Close</Button>
+                            {activeSection < steps.length - 1 && (
+                                <Button variant="outline-primary" size="sm" onClick={() => setActiveSection(activeSection + 1)}>
+                                    Next <i className="bi bi-chevron-right ms-1" />
+                                </Button>
+                            )}
+                            <Button
+                                variant={isDirty(activeSection) ? "success" : "outline-success"}
+                                size="sm"
+                                disabled={savingSection === activeSection || !isDirty(activeSection)}
+                                onClick={() => handleSectionSave(activeSection)}
+                                style={{ minWidth: 150 }}
+                            >
+                                {savingSection === activeSection ? (
+                                    <><Spinner animation="border" size="sm" className="me-1" />Saving…</>
+                                ) : (
+                                    <><i className="bi bi-save me-1" />Save {steps[activeSection].label}</>
+                                )}
                             </Button>
-                        ) : (
-                            <Button variant="success" size="sm" onClick={handleSubmit}>
-                                <i className="bi bi-check2-circle me-1" />
-                                {initialData ? "Update Vehicle" : "Create Vehicle"}
-                            </Button>
-                        )}
-                    </div>
+                        </div>
+                    ) : (
+                        <div className="d-flex gap-2">
+                            <Button variant="outline-secondary" size="sm" onClick={onHide}>Cancel</Button>
+                            {activeSection < steps.length - 1 ? (
+                                <Button variant="primary" size="sm" onClick={() => setActiveSection(activeSection + 1)}>
+                                    Continue <i className="bi bi-chevron-right ms-1" />
+                                </Button>
+                            ) : (
+                                <Button variant="success" size="sm" onClick={handleSubmit}>
+                                    <i className="bi bi-check2-circle me-1" />
+                                    Create Vehicle
+                                </Button>
+                            )}
+                        </div>
+                    )}
                 </div>
             </div>
         </Offcanvas>

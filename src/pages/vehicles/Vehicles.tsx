@@ -11,7 +11,7 @@ import { Vehicle } from "./types/vehicle";
 import { toast, ToastContainer } from "react-toastify";
 import {
     getAllVehicles, getVehicleById, createVehicle, updateVehicle, deleteVehicle, updateVehicleStatus,
-    getAllBrands, getAllModels, getAllVariants,
+    getAllBrands, getAllModels, getAllVariants, updateVariant,
     upsertSpecifications, createPricing, updatePricing,
 } from "../../service/common.service";
 import "react-toastify/dist/ReactToastify.css";
@@ -19,6 +19,125 @@ import "react-toastify/dist/ReactToastify.css";
 type BrandLite = { id: string; name: string };
 type ModelLite = { id: string; name: string; brand_id?: string };
 type VariantLite = { id: string; name: string; model_id?: string };
+
+// ── Shared camelCase(form) → snake_case(API) mappers ───────────────────────────
+// Used by both the single-shot create flow and the per-section edit saves so the
+// two paths can never drift apart.
+export const buildSpecPayload = (subVariantId: string, spec: any) => ({
+    sub_variant_id: subVariantId,
+    performance: {
+        acceleration: spec?.performance?.acceleration || undefined,
+        top_speed: spec?.performance?.topSpeed || undefined,
+        power: spec?.performance?.power || undefined,
+        torque: spec?.performance?.torque || undefined,
+        traction_control: spec?.performance?.tractionControl,
+        launch_control: spec?.performance?.launchControl,
+    },
+    battery: {
+        capacity: spec?.battery?.capacity || undefined,
+        type: spec?.battery?.type || undefined,
+        voltage: spec?.battery?.voltage || undefined,
+        range: spec?.battery?.range || undefined,
+        range_city: spec?.battery?.rangeCity || undefined,
+        range_highway: spec?.battery?.rangeHighway || undefined,
+        efficiency: spec?.battery?.efficiency || undefined,
+        charging: {
+            ac: spec?.battery?.charging?.ac || undefined,
+            dc: spec?.battery?.charging?.dc || undefined,
+            time_10to80: spec?.battery?.charging?.time10to80 || undefined,
+            time_0to100: spec?.battery?.charging?.time0to100 || undefined,
+            connector_type: spec?.battery?.charging?.connector || undefined,
+            port_location: spec?.battery?.charging?.portLocation || undefined,
+        },
+    },
+    dimensions: {
+        length: spec?.dimensions?.length || undefined,
+        width: spec?.dimensions?.width || undefined,
+        height: spec?.dimensions?.height || undefined,
+        wheelbase: spec?.dimensions?.wheelbase || undefined,
+        ground_clearance: spec?.dimensions?.groundClearance || undefined,
+        kerb_weight: spec?.dimensions?.weight || undefined,
+        turning_radius: spec?.dimensions?.turningRadius || undefined,
+    },
+    interior: {
+        seating: spec?.interior?.seating ? Number(spec.interior.seating) || undefined : undefined,
+        seating_material: spec?.interior?.seatingMaterial || undefined,
+        upholstery: spec?.interior?.upholstery || undefined,
+        dashboard: spec?.interior?.dashboard || undefined,
+        infotainment: spec?.interior?.infotainment || undefined,
+        instrument_cluster: spec?.interior?.instrumentCluster || undefined,
+        headroom_front: spec?.interior?.headroomFront || undefined,
+        headroom_rear: spec?.interior?.headroomRear || undefined,
+        legroom_front: spec?.interior?.legroomFront || undefined,
+        legroom_rear: spec?.interior?.legroomRear || undefined,
+        cargo_volume: spec?.interior?.cargo || undefined,
+        cargo_max: spec?.interior?.cargoMax || undefined,
+    },
+    safety: {
+        ncap_rating: spec?.safety?.rating || undefined,
+        airbags: spec?.safety?.airbags || undefined,
+        abs: spec?.safety?.abs,
+        esc: spec?.safety?.esc,
+        tcs: spec?.safety?.tcs,
+        blind_spot: spec?.safety?.blindSpot,
+        lane_assist: spec?.safety?.laneAssist,
+        adaptive_cruise: spec?.safety?.adaptiveCruise,
+        parking_sensors: typeof spec?.safety?.parkingSensors === "string"
+            ? spec.safety.parkingSensors
+            : spec?.safety?.parkingSensors === true ? "both" : undefined,
+        camera_360: spec?.safety?.camera360,
+        autonomous_level: spec?.safety?.autonomousLevel || undefined,
+    },
+    wheels: {
+        front: spec?.wheels?.front || undefined,
+        rear: spec?.wheels?.rear || undefined,
+        wheel_type: spec?.wheels?.type || undefined,
+        spare: spec?.wheels?.spare || undefined,
+        pressure_monitoring: spec?.wheels?.pressureMonitoring,
+    },
+    features: {
+        exterior: spec?.features?.exterior || [],
+        interior: spec?.features?.interior || [],
+        comfort: spec?.features?.comfort || [],
+        entertainment: spec?.features?.entertainment || [],
+        connectivity: spec?.features?.connectivity || [],
+        convenience: spec?.features?.convenience || [],
+    },
+});
+
+export const buildPricingPayload = (pricing: any) => ({
+    on_road_price: pricing?.onRoadPrice || undefined,
+    insurance: pricing?.insurance || undefined,
+    registration: pricing?.registration || undefined,
+    tcs_tax: pricing?.tax || undefined,
+    financing: (pricing?.financing?.emi || pricing?.financing?.interest) ? {
+        emi: pricing.financing.emi || undefined,
+        down_payment: pricing.financing.downPayment || undefined,
+        tenure: pricing.financing.tenure || undefined,
+        interest: pricing.financing.interest || undefined,
+    } : undefined,
+});
+
+// Which spec sub-objects each edit section owns (for individual saves)
+const SECTION_SPEC_KEYS: Record<string, string[]> = {
+    performance: ["performance"],
+    battery: ["battery"],
+    dimensions: ["dimensions", "interior"],
+    safety: ["safety", "wheels"],
+    features: ["features"],
+};
+
+const buildOwnershipPayload = (own: any) => {
+    if (!own) return undefined;
+    return {
+        ...(own.warranty ? { warranty: own.warranty } : {}),
+        ...(own.battery_warranty ? { battery_warranty: own.battery_warranty } : {}),
+        ...(own.service_interval ? { service_interval: own.service_interval } : {}),
+        ...(own.maintenance_cost ? { maintenance_cost: own.maintenance_cost } : {}),
+        roadside_assist: !!own.roadside_assist,
+        ...(own.service_centers != null ? { service_centers: own.service_centers } : {}),
+    };
+};
 
 const Vehicles: React.FC = () => {
     const [searchParams, setSearchParams] = useSearchParams();
@@ -142,106 +261,13 @@ const Vehicles: React.FC = () => {
 
         // 2. Upsert specifications (always send even if mostly empty so record exists)
         if (subVariantId && _specifications) {
-            const spec = _specifications;
-            const specPayload = {
-                sub_variant_id: subVariantId,
-                performance: {
-                    acceleration: spec.performance?.acceleration || undefined,
-                    top_speed: spec.performance?.topSpeed || undefined,
-                    power: spec.performance?.power || undefined,
-                    torque: spec.performance?.torque || undefined,
-                    traction_control: spec.performance?.tractionControl,
-                    launch_control: spec.performance?.launchControl,
-                },
-                battery: {
-                    capacity: spec.battery?.capacity || undefined,
-                    type: spec.battery?.type || undefined,
-                    voltage: spec.battery?.voltage || undefined,
-                    range: spec.battery?.range || undefined,
-                    range_city: spec.battery?.rangeCity || undefined,
-                    range_highway: spec.battery?.rangeHighway || undefined,
-                    efficiency: spec.battery?.efficiency || undefined,
-                    charging: {
-                        ac: spec.battery?.charging?.ac || undefined,
-                        dc: spec.battery?.charging?.dc || undefined,
-                        time_10to80: spec.battery?.charging?.time10to80 || undefined,
-                        time_0to100: spec.battery?.charging?.time0to100 || undefined,
-                        connector_type: spec.battery?.charging?.connector || undefined,
-                        port_location: spec.battery?.charging?.portLocation || undefined,
-                    },
-                },
-                dimensions: {
-                    length: spec.dimensions?.length || undefined,
-                    width: spec.dimensions?.width || undefined,
-                    height: spec.dimensions?.height || undefined,
-                    wheelbase: spec.dimensions?.wheelbase || undefined,
-                    ground_clearance: spec.dimensions?.groundClearance || undefined,
-                    kerb_weight: spec.dimensions?.weight || undefined,
-                    turning_radius: spec.dimensions?.turningRadius || undefined,
-                },
-                interior: {
-                    seating: spec.interior?.seating ? Number(spec.interior.seating) || undefined : undefined,
-                    seating_material: spec.interior?.seatingMaterial || undefined,
-                    upholstery: spec.interior?.upholstery || undefined,
-                    dashboard: spec.interior?.dashboard || undefined,
-                    infotainment: spec.interior?.infotainment || undefined,
-                    instrument_cluster: spec.interior?.instrumentCluster || undefined,
-                    headroom_front: spec.interior?.headroomFront || undefined,
-                    headroom_rear: spec.interior?.headroomRear || undefined,
-                    legroom_front: spec.interior?.legroomFront || undefined,
-                    legroom_rear: spec.interior?.legroomRear || undefined,
-                    cargo_volume: spec.interior?.cargo || undefined,
-                    cargo_max: spec.interior?.cargoMax || undefined,
-                },
-                safety: {
-                    ncap_rating: spec.safety?.rating || undefined,
-                    airbags: spec.safety?.airbags || undefined,
-                    abs: spec.safety?.abs,
-                    esc: spec.safety?.esc,
-                    tcs: spec.safety?.tcs,
-                    blind_spot: spec.safety?.blindSpot,
-                    lane_assist: spec.safety?.laneAssist,
-                    adaptive_cruise: spec.safety?.adaptiveCruise,
-                    parking_sensors: typeof spec.safety?.parkingSensors === "string"
-                        ? spec.safety.parkingSensors
-                        : spec.safety?.parkingSensors === true ? "both" : undefined,
-                    camera_360: spec.safety?.camera360,
-                    autonomous_level: spec.safety?.autonomousLevel || undefined,
-                },
-                wheels: {
-                    front: spec.wheels?.front || undefined,
-                    rear: spec.wheels?.rear || undefined,
-                    wheel_type: spec.wheels?.type || undefined,
-                    spare: spec.wheels?.spare || undefined,
-                    pressure_monitoring: spec.wheels?.pressureMonitoring,
-                },
-                features: {
-                    exterior: spec.features?.exterior || [],
-                    interior: spec.features?.interior || [],
-                    comfort: spec.features?.comfort || [],
-                    entertainment: spec.features?.entertainment || [],
-                    connectivity: spec.features?.connectivity || [],
-                    convenience: spec.features?.convenience || [],
-                },
-            };
-            const specRes = await upsertSpecifications(specPayload);
+            const specRes = await upsertSpecifications(buildSpecPayload(subVariantId, _specifications));
             if (!specRes?.data?.status) saveErrors.push("specifications");
         }
 
         // 3. Create or update pricing
         if (subVariantId && _pricing?.basePrice !== undefined && _pricing?.basePrice !== null) {
-            const pricingData: any = {
-                on_road_price: _pricing.onRoadPrice || undefined,
-                insurance: _pricing.insurance || undefined,
-                registration: _pricing.registration || undefined,
-                tcs_tax: _pricing.tax || undefined,
-                financing: (_pricing.financing?.emi || _pricing.financing?.interest) ? {
-                    emi: _pricing.financing.emi || undefined,
-                    down_payment: _pricing.financing.downPayment || undefined,
-                    tenure: _pricing.financing.tenure || undefined,
-                    interest: _pricing.financing.interest || undefined,
-                } : undefined,
-            };
+            const pricingData = buildPricingPayload(_pricing);
             let pricingRes;
             if (_pricingId) {
                 pricingRes = await updatePricing(_pricingId, { ex_showroom_price: _pricing.basePrice, ...pricingData });
@@ -259,6 +285,108 @@ const Vehicles: React.FC = () => {
         setShowModal(false);
         setEditVehicle(null);
         fetchVehicles();
+    };
+
+    // Per-section save (edit mode only). Each section maps to just its own API call
+    // so a section can be updated independently of the others.
+    const saveSection = async (
+        section: string,
+        form: any,
+    ): Promise<{ ok: boolean; pricingId?: string }> => {
+        const id = editVehicle?.id;
+        if (!id) { toast.error("Save the vehicle first"); return { ok: false }; }
+
+        try {
+            // Core sub-variant fields
+            if (section === "basic") {
+                if (!form.name?.trim()) { toast.error("Vehicle name is required"); return { ok: false }; }
+                if (!form.slug?.trim()) { toast.error("Slug is required"); return { ok: false }; }
+                if (!form.variant_id) { toast.error("Variant is required"); return { ok: false }; }
+                if (!form.fuel_type) { toast.error("Fuel type is required"); return { ok: false }; }
+                if (!form.transmission) { toast.error("Transmission is required"); return { ok: false }; }
+                const res = await updateVehicle(id, {
+                    name: form.name.trim(),
+                    slug: form.slug.trim(),
+                    variant_id: form.variant_id,
+                    fuel_type: form.fuel_type,
+                    transmission: form.transmission,
+                    engine: form.engine?.trim() || "",
+                    ...(form.drivetrain ? { drivetrain: form.drivetrain } : {}),
+                });
+                return finishSection(res, "Basic details");
+            }
+
+            if (section === "ownership") {
+                const res = await updateVehicle(id, { ownership: buildOwnershipPayload(form.api_ownership) });
+                return finishSection(res, "Ownership");
+            }
+
+            if (section === "settings") {
+                // status lives on the sub-variant; featured + competitor_ids live
+                // on the parent Variant (shared across its sub-variants).
+                const statusRes = await updateVehicle(id, { status: form.status });
+                let ok = !!statusRes?.data?.status;
+                if (!ok) { toast.error(statusRes?.data?.message || "Failed to save status"); return { ok: false }; }
+
+                if (form.variant_id) {
+                    const varRes = await updateVariant(form.variant_id, {
+                        featured: !!form.featured,
+                        competitor_ids: form.competitor_ids || [],
+                    });
+                    if (!varRes?.data?.status) {
+                        toast.warning("Status saved, but failed to save featured / competitors");
+                        return { ok: false };
+                    }
+                }
+                toast.success("Settings saved");
+                fetchVehicles();
+                return { ok: true };
+            }
+
+            // Specification sections — send only this section's sub-objects so the
+            // rest of the specs document is left untouched.
+            if (SECTION_SPEC_KEYS[section]) {
+                const full: any = buildSpecPayload(id, form.specifications);
+                const picked: any = { sub_variant_id: id };
+                for (const key of SECTION_SPEC_KEYS[section]) picked[key] = full[key];
+                const res = await upsertSpecifications(picked);
+                return finishSection(res, "Specifications");
+            }
+
+            // Pricing
+            if (section === "pricing") {
+                if (form.pricing?.basePrice == null || form.pricing.basePrice === "") {
+                    toast.error("Base price is required to save pricing");
+                    return { ok: false };
+                }
+                const pricingId = form._pricingId ?? (editVehicle as any)?.pricing?.[0]?.id ?? null;
+                const body = { ex_showroom_price: form.pricing.basePrice, ...buildPricingPayload(form.pricing) };
+                const res = pricingId
+                    ? await updatePricing(pricingId, body)
+                    : await createPricing({ sub_variant_id: id, ...body });
+                if (res?.data?.status) {
+                    toast.success("Pricing saved");
+                    return { ok: true, pricingId: res.data.data?.id || pricingId };
+                }
+                toast.error(res?.data?.message || "Failed to save pricing");
+                return { ok: false };
+            }
+
+            return { ok: false };
+        } catch (e: any) {
+            toast.error(e?.response?.data?.message || "Save failed");
+            return { ok: false };
+        }
+    };
+
+    const finishSection = (res: any, label: string): { ok: boolean } => {
+        if (res?.data?.status) {
+            toast.success(`${label} saved`);
+            fetchVehicles();
+            return { ok: true };
+        }
+        toast.error(res?.data?.message || `Failed to save ${label}`);
+        return { ok: false };
     };
 
     const handleDelete = async (id: string) => {
@@ -476,6 +604,7 @@ const Vehicles: React.FC = () => {
                     show={showModal}
                     onHide={() => { setShowModal(false); setEditVehicle(null); }}
                     onSubmit={saveVehicle}
+                    onSectionSave={saveSection}
                     initialData={editVehicle}
                 />
                 <ToastContainer position="top-right" autoClose={3000} />

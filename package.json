@@ -56,11 +56,10 @@
     "web-vitals": "^2.1.4"
   },
   "scripts": {
-    "start": "react-scripts start PORT=3003",
-    "build:dev": "cross-env NODE_ENV=dev react-scripts build",
-    "build:uat": "cross-env NODE_ENV=uat react-scripts build",
-    "build:prod": "cross-env NODE_ENV=production react-scripts build",
-    "build:staging": "cross-env NODE_ENV=staging react-scripts build",
+    "start": "cross-env PORT=3003 env-cmd -f .env.development -- react-scripts start",
+    "build:dev": "env-cmd -f .env.development -- react-scripts build",
+    "build:uat": "env-cmd -f .env.uat -- react-scripts build",
+    "build:prod": "env-cmd -f .env.production -- react-scripts build",
     "test": "react-scripts test",
     "test:ci": "cross-env CI=true react-scripts test",
     "eject": "react-scripts eject"
@@ -93,6 +92,7 @@
     "@types/websocket": "^1.0.10",
     "cross-env": "^7.0.3",
     "dotenv": "^16.4.5",
+    "env-cmd": "^11.0.0",
     "eslint": "^8.57.0",
     "eslint-plugin-react": "^7.34.3",
     "eslint-plugin-react-hooks": "^4.6.2",
